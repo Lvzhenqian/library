@@ -1,6 +1,7 @@
 package fn
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/md5"
 	"crypto/sha1"
@@ -9,9 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
+	"io"
 	"os"
+	"path"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 )
 
 func Sum(b []byte, hash hash.Hash) []byte {
@@ -125,4 +130,68 @@ func LastCut(src, sep string) (before, after string, found bool) {
 		return src, "", false
 	}
 	return src[:idx], src[idx+len(sep):], true
+}
+
+func ZipFile(source, target string) error {
+	zipFile, err := os.Create(target)
+	if err != nil {
+		return err
+	}
+	if path.IsAbs(source) {
+		if err := os.Chdir(path.Dir(source)); err != nil {
+			return err
+		}
+		source = path.Base(source)
+	}
+	defer zipFile.Close()
+	archive := zip.NewWriter(zipFile)
+	defer archive.Close()
+	stat, statErr := os.Stat(source)
+	if statErr != nil {
+		return statErr
+	}
+	if stat.IsDir() {
+		return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+			if !info.IsDir() {
+				header, err := zip.FileInfoHeader(info)
+				if err != nil {
+					return err
+				}
+				header.Method = zip.Deflate
+				header.Modified = time.Unix(info.ModTime().Unix(), 0)
+				header.Name = path
+				writer, err := archive.CreateHeader(header)
+				if err != nil {
+					return err
+				}
+				file, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer file.Close()
+				_, err = io.Copy(writer, file)
+				return err
+			}
+			return nil
+		})
+	}
+
+	header, headErr := zip.FileInfoHeader(stat)
+	if headErr != nil {
+		return headErr
+	}
+	header.Method = zip.Deflate
+	header.Modified = time.Unix(stat.ModTime().Unix(), 0)
+	header.Name = source
+	writer, createErr := archive.CreateHeader(header)
+	if createErr != nil {
+		return err
+	}
+	file, openErr := os.Open(source)
+	if openErr != nil {
+		return openErr
+	}
+	defer file.Close()
+	_, err = io.Copy(writer, file)
+	return err
 }
