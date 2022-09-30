@@ -1,3 +1,3 @@
-module github.com/Lvzhenqian/library/errors/v1.0
+module github.com/Lvzhenqian/library/errors
 
 go 1.19

@@ -1,4 +1,4 @@
-module github.com/Lvzhenqian/library/ddsender/v1.0
+module github.com/Lvzhenqian/library/ddsender
 
 go 1.19
 

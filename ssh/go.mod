@@ -1,4 +1,4 @@
-module github.com/Lvzhenqian/library/ssh/v1.0
+module github.com/Lvzhenqian/library/ssh
 
 go 1.19
 

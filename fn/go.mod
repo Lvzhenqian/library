@@ -1,3 +1,3 @@
-module github.com/Lvzhenqian/library/fn/v1
+module github.com/Lvzhenqian/library/fn
 
 go 1.19
