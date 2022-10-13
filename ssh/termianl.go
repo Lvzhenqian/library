@@ -9,7 +9,6 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 	"gopkg.in/cheggaaa/pb.v1"
 	"io"
-	"math/rand"
 	"net"
 	"os"
 	"path"
@@ -31,7 +30,7 @@ type SshClient struct {
 func NewClient(config ClientConfig) (Client, error) {
 	var (
 		auth []ssh.AuthMethod
-		ac = config.Config()
+		ac   = config.Config()
 	)
 	if ac.Password != "" {
 		auth = []ssh.AuthMethod{ssh.Password(ac.Password)}
@@ -43,8 +42,8 @@ func NewClient(config ClientConfig) (Client, error) {
 			content []byte
 			readErr error
 		)
-		_,err := os.Stat(ac.PrivateKey)
-		if os.IsExist(err){
+		_, err := os.Stat(ac.PrivateKey)
+		if os.IsExist(err) {
 			content, readErr = os.ReadFile(ac.PrivateKey)
 			if readErr != nil {
 				return nil, fmt.Errorf("open private key %s error: %w", ac.PrivateKey, readErr)
@@ -123,7 +122,7 @@ func RemoteRealpath(ph string, c *sftp.Client) string {
 }
 
 func testPort(n NetworkConfig) bool {
-	_,err := net.DialTimeout(n.Network,n.Address,time.Duration(n.ConnectTimeout)*time.Second)
+	_, err := net.DialTimeout(n.Network, n.Address, time.Duration(n.ConnectTimeout)*time.Second)
 	if err != nil {
 		return false
 	}
@@ -544,25 +543,25 @@ func (c *SshClient) Close() error {
 }
 
 func (c *SshClient) Proxy(auth AuthConfig) (Client, error) {
-	var tunnelErr error
-	rand.Seed(time.Now().UnixNano())
-	LocalConfig := NetworkConfig{
-		Network: "tcp",
-		Address: fmt.Sprintf("127.0.0.1:%d",rand.Intn(10000)+50000),
-		ConnectTimeout: 3,
+	conn, connErr := c.client.Dial(auth.Network, auth.Address)
+	if connErr != nil {
+		return nil, connErr
 	}
-	go func() {
-		tunnelErr = c.TunnelStart(LocalConfig,auth.NetworkConfig)
-	}()
-	if tunnelErr != nil {
-		return nil,fmt.Errorf("start tunnel error: %w",tunnelErr)
+	proxyCfg := &ssh.ClientConfig{
+		User:            auth.Username,
+		Auth:            []ssh.AuthMethod{ssh.Password(auth.Password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         time.Duration(auth.ConnectTimeout) * time.Second,
 	}
-	tk := time.NewTicker(time.Second)
-	for range tk.C {
-		if testPort(LocalConfig){
-			break
-		}
+
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, auth.Address, proxyCfg)
+	if err != nil {
+		return nil, err
 	}
-	auth.NetworkConfig = LocalConfig
-	return NewClient(&auth)
+	client := ssh.NewClient(ncc, chans, reqs)
+	session, sessionErr := client.NewSession()
+	if sessionErr != nil {
+		return nil, sessionErr
+	}
+	return &SshClient{client: client, session: session}, nil
 }
