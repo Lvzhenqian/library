@@ -1,6 +1,6 @@
-// +build !windows
+//go:build !windows
 
-package sshtool
+package ssh
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"syscall"
 )
 
-func (c *SshClient) updateTerminalSize() {
+func (c *clientType) updateTerminalSize() {
 
 	go func() {
 		// SIGWINCH is sent to the process when the window size of the terminal has
@@ -34,7 +34,7 @@ func (c *SshClient) updateTerminalSize() {
 				}
 				currTermWidth, currTermHeight, err := terminal.GetSize(fd)
 
-				// Terminal size has not changed, don'c do anything.
+				// Terminal size has not changed, don't do anything.
 				if currTermHeight == termHeight && currTermWidth == termWidth {
 					continue
 				}

@@ -1,4 +1,4 @@
-package sshtool
+package ssh
 
 import (
 	"io"

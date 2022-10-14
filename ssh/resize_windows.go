@@ -1,8 +1,8 @@
-// +build windows
+//go:build windows
 
-package sshtool
+package ssh
 
 // windows not support Terminal Resize
-func (c *SshClient) updateTerminalSize() {
+func (c *clientType) updateTerminalSize() {
 	return
 }

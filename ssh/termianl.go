@@ -1,4 +1,4 @@
-package sshtool
+package ssh
 
 import (
 	"bufio"
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-type SshClient struct {
+type clientType struct {
 	session *ssh.Session
 	client  *ssh.Client
 	exitMsg string
@@ -41,7 +41,7 @@ func NewClient(conf *AuthConfig) (Client, error) {
 	if getSessionErr != nil {
 		return nil, getSessionErr
 	}
-	return &SshClient{client: cli, session: session}, nil
+	return &clientType{client: cli, session: session}, nil
 }
 
 func authConfig(conf *AuthConfig) (*ssh.ClientConfig, error) {
@@ -126,11 +126,11 @@ func RemoteRealpath(ph string, c *sftp.Client) string {
 	return ph
 }
 
-func (c *SshClient) closeSession() error {
+func (c *clientType) closeSession() error {
 	return c.session.Close()
 }
 
-func (c *SshClient) interactiveSession() error {
+func (c *clientType) interactiveSession() error {
 	defer c.closeSession()
 	defer func() {
 		if c.exitMsg == "" {
@@ -207,7 +207,7 @@ func (c *SshClient) interactiveSession() error {
 	return nil
 }
 
-func (c *SshClient) Run(cmd string, w io.Writer) error {
+func (c *clientType) Run(cmd string, w io.Writer) error {
 	// close session
 	defer c.closeSession()
 	reader, ReaderErr := c.session.StdoutPipe()
@@ -229,11 +229,11 @@ func (c *SshClient) Run(cmd string, w io.Writer) error {
 	return nil
 }
 
-func (c *SshClient) Login() error {
+func (c *clientType) Login() error {
 	return c.interactiveSession()
 }
 
-func (c *SshClient) PushFile(src string, dst string) error {
+func (c *clientType) PushFile(src string, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -272,7 +272,7 @@ func (c *SshClient) PushFile(src string, dst string) error {
 	return nil
 }
 
-func (c *SshClient) GetFile(src string, dst string) error {
+func (c *clientType) GetFile(src string, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -314,7 +314,7 @@ func (c *SshClient) GetFile(src string, dst string) error {
 	return nil
 }
 
-func (c *SshClient) PushDir(src string, dst string) error {
+func (c *clientType) PushDir(src string, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -370,7 +370,7 @@ func (c *SshClient) PushDir(src string, dst string) error {
 	return nil
 }
 
-func (c *SshClient) GetDir(src string, dst string) error {
+func (c *clientType) GetDir(src string, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -419,17 +419,17 @@ func (c *SshClient) GetDir(src string, dst string) error {
 				os.Mkdir(p, 0755)
 			default:
 				files, _ := c.Open(w.Path())
-				defer files.Close()
 				ds, errs := os.Create(p)
 				if errs != nil {
 					panic(errs)
 				}
-				defer ds.Close()
 				//io.Copy(ds,file)
 				i, e := io.Copy(ds, files)
 				if e != nil {
 					fmt.Println(e)
 				}
+				ds.Close()
+				files.Close()
 				b.Add64(i)
 			}
 		}
@@ -439,7 +439,7 @@ func (c *SshClient) GetDir(src string, dst string) error {
 	return nil
 }
 
-func (c *SshClient) Get(src, dst string) error {
+func (c *clientType) Get(src, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -467,7 +467,7 @@ func (c *SshClient) Get(src, dst string) error {
 	}
 }
 
-func (c *SshClient) Push(src, dst string) error {
+func (c *clientType) Push(src, dst string) error {
 	var (
 		Realsrc string
 		Realdst string
@@ -499,7 +499,7 @@ func (c *SshClient) Push(src, dst string) error {
 	}
 }
 
-func (c *SshClient) TunnelStart(Local, Remote NetworkConfig) error {
+func (c *clientType) TunnelStart(Local, Remote NetworkConfig) error {
 	listener, err := net.Listen(Local.Network, Local.Address)
 	if err != nil {
 		return err
@@ -515,7 +515,7 @@ func (c *SshClient) TunnelStart(Local, Remote NetworkConfig) error {
 	}
 }
 
-func (c *SshClient) forward(localConn net.Conn, remote NetworkConfig) {
+func (c *clientType) forward(localConn net.Conn, remote NetworkConfig) {
 	remoteConn, err := c.client.Dial(remote.Network, remote.Address)
 	if err != nil {
 		return
@@ -534,12 +534,12 @@ func (c *SshClient) forward(localConn net.Conn, remote NetworkConfig) {
 	go copyConn(remoteConn, localConn)
 }
 
-func (c *SshClient) Close() error {
+func (c *clientType) Close() error {
 	c.session.Close()
 	return c.client.Close()
 }
 
-func (c *SshClient) Proxy(auth *AuthConfig) (Client, error) {
+func (c *clientType) Proxy(auth *AuthConfig) (Client, error) {
 	conn, connErr := c.client.Dial(auth.Network, auth.Address)
 	if connErr != nil {
 		return nil, connErr
@@ -557,5 +557,5 @@ func (c *SshClient) Proxy(auth *AuthConfig) (Client, error) {
 	if sessionErr != nil {
 		return nil, sessionErr
 	}
-	return &SshClient{client: client, session: session}, nil
+	return &clientType{client: client, session: session}, nil
 }
