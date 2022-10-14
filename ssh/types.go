@@ -4,10 +4,6 @@ import (
 	"io"
 )
 
-type ClientConfig interface {
-	Config() *AuthConfig
-}
-
 // same as net.Dial
 type NetworkConfig struct {
 	Network string
@@ -24,16 +20,12 @@ type AuthConfig struct {
 	NetworkConfig
 }
 
-func (a *AuthConfig) Config() *AuthConfig {
-	return a
-}
-
 type Client interface {
 	Login() error
 	Run(cmd string, output io.Writer) error
 	Get(src, dst string) error
 	Push(src, dst string) error
 	TunnelStart(Local, Remote NetworkConfig) error
-	Proxy(RemoteAuthConfig AuthConfig) (Client, error)
+	Proxy(RemoteAuthConfig *AuthConfig) (Client, error)
 	Close() error
 }

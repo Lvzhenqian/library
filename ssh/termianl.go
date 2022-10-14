@@ -27,44 +27,13 @@ type SshClient struct {
 	stderr  io.Reader
 }
 
-func NewClient(config ClientConfig) (Client, error) {
-	var (
-		auth []ssh.AuthMethod
-		ac   = config.Config()
-	)
-	if ac.Password != "" {
-		auth = []ssh.AuthMethod{ssh.Password(ac.Password)}
-	} else {
-		if ac.PrivateKey == "" {
-			ac.PrivateKey = "~/.ssh/id_rsa"
-		}
-		var (
-			content []byte
-			readErr error
-		)
-		_, err := os.Stat(ac.PrivateKey)
-		if os.IsExist(err) {
-			content, readErr = os.ReadFile(ac.PrivateKey)
-			if readErr != nil {
-				return nil, fmt.Errorf("open private key %s error: %w", ac.PrivateKey, readErr)
-			}
-		} else {
-			content = []byte(ac.PrivateKey)
-		}
-		signer, parseErr := ssh.ParsePrivateKey(content)
-		if parseErr != nil {
-			return nil, fmt.Errorf("parse private key %s error: %w", ac.PrivateKey, parseErr)
-		}
-		auth = []ssh.AuthMethod{ssh.PublicKeys(signer)}
+func NewClient(conf *AuthConfig) (Client, error) {
+	clientCfg, cfgErr := authConfig(conf)
+	if cfgErr != nil {
+		return nil, cfgErr
 	}
 
-	cfg := &ssh.ClientConfig{
-		User:            ac.Username,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Duration(ac.ConnectTimeout) * time.Second,
-	}
-	cli, err := ssh.Dial(ac.Network, ac.Address, cfg)
+	cli, err := ssh.Dial(conf.Network, conf.Address, clientCfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect error: %w", err)
 	}
@@ -73,6 +42,42 @@ func NewClient(config ClientConfig) (Client, error) {
 		return nil, getSessionErr
 	}
 	return &SshClient{client: cli, session: session}, nil
+}
+
+func authConfig(conf *AuthConfig) (*ssh.ClientConfig, error) {
+	auth := make([]ssh.AuthMethod, 0)
+	if conf.Password != "" {
+		auth = append(auth, ssh.Password(conf.Password))
+	} else {
+		if conf.PrivateKey == "" {
+			conf.PrivateKey = "~/.ssh/id_rsa"
+		}
+		var (
+			content []byte
+			readErr error
+		)
+		_, err := os.Stat(conf.PrivateKey)
+		if os.IsExist(err) {
+			content, readErr = os.ReadFile(conf.PrivateKey)
+			if readErr != nil {
+				return nil, fmt.Errorf("open private key %s error: %w", conf.PrivateKey, readErr)
+			}
+		} else {
+			content = []byte(conf.PrivateKey)
+		}
+		signer, parseErr := ssh.ParsePrivateKey(content)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse private key %s error: %w", conf.PrivateKey, parseErr)
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+
+	return &ssh.ClientConfig{
+		User:            conf.Username,
+		Auth:            auth,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         time.Duration(conf.ConnectTimeout) * time.Second,
+	}, nil
 }
 
 func TotalSize(paths string) int64 {
@@ -119,14 +124,6 @@ func RemoteRealpath(ph string, c *sftp.Client) string {
 		return path.Join(sl...)
 	}
 	return ph
-}
-
-func testPort(n NetworkConfig) bool {
-	_, err := net.DialTimeout(n.Network, n.Address, time.Duration(n.ConnectTimeout)*time.Second)
-	if err != nil {
-		return false
-	}
-	return true
 }
 
 func (c *SshClient) closeSession() error {
@@ -542,18 +539,15 @@ func (c *SshClient) Close() error {
 	return c.client.Close()
 }
 
-func (c *SshClient) Proxy(auth AuthConfig) (Client, error) {
+func (c *SshClient) Proxy(auth *AuthConfig) (Client, error) {
 	conn, connErr := c.client.Dial(auth.Network, auth.Address)
 	if connErr != nil {
 		return nil, connErr
 	}
-	proxyCfg := &ssh.ClientConfig{
-		User:            auth.Username,
-		Auth:            []ssh.AuthMethod{ssh.Password(auth.Password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         time.Duration(auth.ConnectTimeout) * time.Second,
+	proxyCfg, cfgErr := authConfig(auth)
+	if cfgErr != nil {
+		return nil, cfgErr
 	}
-
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, auth.Address, proxyCfg)
 	if err != nil {
 		return nil, err

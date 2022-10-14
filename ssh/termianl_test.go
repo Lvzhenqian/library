@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-var authConfig = &AuthConfig{
+var auth = &AuthConfig{
 	Username:   "root",
 	Password:   "charles",
 	PrivateKey: "",
@@ -17,7 +17,7 @@ var authConfig = &AuthConfig{
 }
 
 func TestSSHTerminal_Run(t *testing.T) {
-	cli, newClientErr := NewClient(authConfig)
+	cli, newClientErr := NewClient(auth)
 	if newClientErr != nil {
 		t.Errorf("new client error: %v", newClientErr)
 		return
@@ -29,19 +29,19 @@ func TestSSHTerminal_Run(t *testing.T) {
 }
 
 func TestSSHTerminal_Push(t *testing.T) {
-	cli, Newerr := NewClient(authConfig)
+	cli, Newerr := NewClient(auth)
 	if Newerr != nil {
 		t.Errorf("new client error: %v", Newerr)
 		return
 	}
 	defer cli.Close()
-	if err := cli.Push("~/Downloads/log.sh", "/tmp"); err != nil {
+	if err := cli.Push("~/Downloads/jdk1.8.0_241.zip", "/tmp"); err != nil {
 		t.Error(err)
 	}
 }
 
 func TestSSHTerminal_Get(t *testing.T) {
-	cli, Newerr := NewClient(authConfig)
+	cli, Newerr := NewClient(auth)
 
 	if Newerr != nil {
 		t.Errorf("new client error: %v", Newerr)
@@ -62,66 +62,65 @@ func TestSSHTerminal_TunnelStart(t *testing.T) {
 		Network: "tcp",
 		Address: "10.1.12.46:22",
 	}
-	cli, Newerr := NewClient(authConfig)
+	cli, Newerr := NewClient(auth)
 	if Newerr != nil {
 		t.Errorf("new client error: %v", Newerr)
 		return
 	}
-	if err := cli.TunnelStart(LocalConfig, RemoteConfig);err != nil {
-		t.Errorf("start ssh tunnel error: %v",err)
+	if err := cli.TunnelStart(LocalConfig, RemoteConfig); err != nil {
+		t.Errorf("start ssh tunnel error: %v", err)
 	}
 }
 
 func TestSshClient_Proxy(t *testing.T) {
-	cli, Newerr := NewClient(authConfig)
-	remoteAuth := AuthConfig{
-		Username:      "root",
-		Password:      "123456",
-		PrivateKey:    "",
-		NetworkConfig: NetworkConfig{
-			Network: "tcp",
-			Address: "10.1.12.46:22",
-			ConnectTimeout: 5,
-		},
-	}
+	cli, Newerr := NewClient(auth)
 	if Newerr != nil {
 		t.Errorf("new client error: %v", Newerr)
 		return
 	}
 	defer cli.Close()
-	secondClient ,secErr:= cli.Proxy(remoteAuth)
+	secondClient, secErr := cli.Proxy(&AuthConfig{
+		Username:   "root",
+		Password:   "123456",
+		PrivateKey: "",
+		NetworkConfig: NetworkConfig{
+			Network:        "tcp",
+			Address:        "10.1.12.46:22",
+			ConnectTimeout: 5,
+		},
+	})
 	if secErr != nil {
-		t.Errorf("proxy second clien error: %v",secErr)
+		t.Errorf("proxy second clien error: %v", secErr)
 		return
 	}
-	defer  secondClient.Close()
-	secondClient.Run("hostname",os.Stdout)
+	defer secondClient.Close()
+	secondClient.Run("hostname", os.Stdout)
 }
 
 func ExampleNewClient() {
-	cli, _ := NewClient(authConfig)
+	cli, _ := NewClient(auth)
 	cli.Run("w", os.Stdout)
 }
 
 func ExampleSSHTerminal_Login() {
-	cli, _ := NewClient(authConfig)
+	cli, _ := NewClient(auth)
 	cli.Login()
 }
 
 func ExampleSSHTerminal_Get() {
-	cli, _ := NewClient(authConfig)
+	cli, _ := NewClient(auth)
 	defer cli.Close()
 	cli.Get("/tmp/test02", ".")
 }
 
 func ExampleSSHTerminal_Push() {
-	cli, _ := NewClient(authConfig)
+	cli, _ := NewClient(auth)
 	defer cli.Close()
 	cli.Push("./test", "/tmp")
 }
 
 func ExampleSSHTerminal_TunnelStart() {
-	cli, _ := NewClient(authConfig)
+	cli, _ := NewClient(auth)
 	local := NetworkConfig{
 		Network: "tcp",
 		Address: "127.0.0.1:9000",
