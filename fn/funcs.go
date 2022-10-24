@@ -17,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 func Sum(b []byte, hash hash.Hash) []byte {
@@ -67,6 +68,38 @@ func Exist(p string) bool {
 		return os.IsExist(err)
 	}
 	return true
+}
+
+func SliceTurning[T comparable](target []T, limit int) chan []T {
+	var (
+		total = len(target)
+		value = make(chan []T)
+	)
+
+	go func() {
+		if limit > 0 {
+			for offset := 0; offset < total; offset += limit {
+				if offset+limit > total {
+					limit = total % limit
+				}
+				value <- target[offset : offset+limit]
+			}
+		} else {
+			value <- target
+		}
+
+		close(value)
+	}()
+
+	return value
+}
+
+func ToString(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
+}
+
+func ToBytes(s string) []byte {
+	return *(*[]byte)(unsafe.Pointer(&s))
 }
 
 // TestPrintJson 以json格式打印测试结果
