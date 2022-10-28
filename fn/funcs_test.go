@@ -23,5 +23,6 @@ func TestToString(t *testing.T) {
 	t.Log(b)
 	s := ToString(b)
 	t.Log(s)
-	t.Log(ToBytes(s))
+	bt := ToBytes(s)
+	t.Log(cap(b) == cap(bt))
 }

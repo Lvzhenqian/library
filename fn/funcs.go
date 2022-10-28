@@ -99,7 +99,11 @@ func ToString(b []byte) string {
 }
 
 func ToBytes(s string) []byte {
-	return *(*[]byte)(unsafe.Pointer(&s))
+	// 字符串结构头
+	strHeader := (*[2]uintptr)(unsafe.Pointer(&s))
+	// 切片结构头，最后一位为cap
+	sliceHeader := [3]uintptr{strHeader[0], strHeader[1], strHeader[1]}
+	return *(*[]byte)(unsafe.Pointer(&sliceHeader))
 }
 
 // TestPrintJson 以json格式打印测试结果
