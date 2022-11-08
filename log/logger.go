@@ -3,6 +3,7 @@ package log
 import (
 	"bufio"
 	"fmt"
+	"github.com/Lvzhenqian/library/errors"
 	"github.com/rs/zerolog"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
@@ -64,6 +65,9 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 	level, err := zerolog.ParseLevel(conf.LogLevel)
 	if err != nil {
 		return nil, err
+	}
+	zerolog.ErrorStackMarshaler = func(err error) interface{} {
+		return errors.ErrorStack(err)
 	}
 
 	consoleWriter := zerolog.ConsoleWriter{
@@ -158,58 +162,99 @@ func (l *ZeroLogger) SetLevel(level string) error {
 func (l *ZeroLogger) GetLevel() string {
 	return l.file.GetLevel().String()
 }
+
 func (l *ZeroLogger) Panic(msg string) {
 	l.multi.Panic().Msg(msg)
 }
+
 func (l *ZeroLogger) Fatal(msg string) {
 	l.multi.Fatal().Msg(msg)
 }
+
 func (l *ZeroLogger) Error(msg string) {
 	l.multi.Error().Msg(msg)
 }
+
 func (l *ZeroLogger) WithError(err error, msg string) {
 	l.multi.Error().Err(err).Msg(msg)
 }
+
+func (l *ZeroLogger) WithErrorf(err error, format string, args ...interface{}) {
+	l.multi.Error().Err(err).Msgf(format, args)
+}
+
 func (l *ZeroLogger) Warn(msg string) {
 	l.multi.Warn().Msg(msg)
 }
+
 func (l *ZeroLogger) Info(msg string) {
 	l.file.Info().Msg(msg)
 }
+
 func (l *ZeroLogger) Debug(msg string) {
 	l.file.Debug().Msg(msg)
 }
+
 func (l *ZeroLogger) Trace(msg string) {
 	l.file.Trace().Msg(msg)
 }
+
 func (l *ZeroLogger) File() *zerolog.Logger {
 	logger := newLogger(l.fileWriter, *l.level, l.skipFrame-1)
 	return &logger
 }
+
 func (l *ZeroLogger) Multi() *zerolog.Logger {
 	logger := newLogger(l.multiWriter, *l.level, l.skipFrame-1)
 	return &logger
 }
+
 func (l *ZeroLogger) Panicf(f string, value ...interface{}) {
 	l.multi.Panic().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Fatalf(f string, value ...interface{}) {
 	l.multi.Fatal().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Errorf(f string, value ...interface{}) {
 	l.multi.Error().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Warnf(f string, value ...interface{}) {
 	l.multi.Warn().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Infof(f string, value ...interface{}) {
 	l.file.Info().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Debugf(f string, value ...interface{}) {
 	l.file.Debug().Msgf(f, value...)
 }
+
 func (l *ZeroLogger) Tracef(f string, value ...interface{}) {
 	l.file.Trace().Msgf(f, value...)
+}
+
+func (l *ZeroLogger) WithStackError(err error, msg string) {
+	l.multi.Err(err).Stack().Msg(msg)
+}
+
+func (l *ZeroLogger) WithStackErrorf(err error, format string, args ...interface{}) {
+	l.multi.Err(err).Stack().Msgf(format, args)
+}
+
+func (l *ZeroLogger) WithWarp(err error, msg string) error {
+	e := errors.Wrap(err)
+	l.multi.Err(e).Msg(msg)
+	return e
+}
+
+func (l *ZeroLogger) WithWarpf(err error, format string, args ...interface{}) error {
+	e := errors.Wrapf(err, format, args)
+	l.multi.Err(e).Msgf(format, args)
+	return e
 }
 
 // WithPipe 会导致 1个goroutine 泄漏，请尽量少用
