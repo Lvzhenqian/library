@@ -11,10 +11,15 @@ func do() Result[*os.File] {
 
 func TestOk(t *testing.T) {
 	r := do()
-	if r.IsErr() {
-		t.Fatal(r.Err())
-	}
-	file := r.Some()
-	defer file.Close()
-	t.Log(file.Name())
+	r.Match(
+		func(v *os.File) (*os.File, error) {
+			t.Log(v.Name())
+			return nil, v.Close()
+		},
+
+		func(e error) (*os.File, error) {
+			t.Fatal(e)
+			return nil, nil
+		},
+	)
 }

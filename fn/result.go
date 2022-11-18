@@ -24,6 +24,13 @@ func (r *Result[T]) Some() T {
 	return r.something
 }
 
+func (r *Result[T]) Match(onSuccess func(value T) (T, error), onError func(err error) (T, error)) Result[T] {
+	if r.IsErr() {
+		return Try(onError(r.err))
+	}
+	return Try(onSuccess(r.something))
+}
+
 func Ok[T any](t T) Result[T] {
 	return Result[T]{something: t, err: nil}
 }
