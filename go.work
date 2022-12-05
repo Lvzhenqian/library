@@ -6,4 +6,5 @@ use (
 	./fn
 	./log
 	./ssh
+	./configs
 )
