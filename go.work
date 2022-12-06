@@ -7,4 +7,5 @@ use (
 	./log
 	./ssh
 	./configs
+	./groupsync
 )
