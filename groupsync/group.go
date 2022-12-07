@@ -5,53 +5,96 @@ import (
 	"sync"
 )
 
+type Options func(group *Option)
+
+type Option struct {
+	worker        int
+	receiver      int
+	limit         int
+	channelBuffer int
+}
+
 type Group[T any] struct {
-	collector []T
+	collector *[]T
 	channel   chan T
 
 	wg   *sync.WaitGroup
 	pool *ants.Pool
 }
 
-func NewSendGroup[T any](limit int) (*Group[T], error) {
-	pool, err := ants.NewPool(limit, ants.WithPreAlloc(true))
+func NewGroup[T any](collector *[]T, opt ...Options) (*Group[T], error) {
+	var err error
+	group := &Group[T]{
+		collector: collector,
+		wg:        new(sync.WaitGroup),
+	}
+	option := &Option{
+		worker:   10,
+		receiver: 3,
+	}
+	if option.limit < option.worker+option.receiver {
+		option.limit = option.worker + option.receiver
+	}
+	group.channel = make(chan T, option.channelBuffer)
+
+	for _, fn := range opt {
+		fn(option)
+	}
+	group.pool, err = ants.NewPool(option.limit, ants.WithPreAlloc(true))
 	if err != nil {
 		return nil, err
 	}
-	receiver := (limit / 5) + 1
-	group := &Group[T]{
-		collector: make([]T, 0),
-		pool:      pool,
-		channel:   make(chan T, receiver),
-		wg:        new(sync.WaitGroup),
-	}
 
-	group.receiver(receiver)
+	group.startReceiver(option)
 	return group, nil
 }
 
-func (g *Group[T]) receiver(ss int) {
-	for i := 0; i < ss; i++ {
+func (g *Group[T]) startReceiver(opt *Option) {
+	for i := 0; i < opt.receiver; i++ {
 		g.pool.Submit(func() {
 			for s := range g.channel {
-				g.collector = append(g.collector, s)
+				*g.collector = append(*g.collector, s)
 			}
 		})
 	}
 }
 
-func (g *Group[T]) Go(fn func(c chan<- T)) error {
+func (g *Group[T]) Go(fn func() T) error {
 	g.wg.Add(1)
 	return g.pool.Submit(func() {
-		fn(g.channel)
+		g.channel <- fn()
 		g.wg.Done()
 	})
 }
 
-func (g *Group[T]) Wait() []T {
+func (g *Group[T]) Wait() {
 	defer g.pool.Release()
 	g.wg.Wait()
 	close(g.channel)
 
-	return g.collector
+	return
+}
+
+func WithLimit(limit int) Options {
+	return func(opt *Option) {
+		opt.limit = limit
+	}
+}
+
+func WithWorker(worker int) Options {
+	return func(opt *Option) {
+		opt.worker = worker
+	}
+}
+
+func WithReceivers(recv int) Options {
+	return func(opt *Option) {
+		opt.receiver = recv
+	}
+}
+
+func WithChannelBuffer(size int) Options {
+	return func(opt *Option) {
+		opt.channelBuffer = size
+	}
 }
