@@ -22,7 +22,7 @@ type AuthConfig struct {
 
 type Client interface {
 	Login() error
-	Run(cmd string, output io.Writer) error
+	Run(cmd string, stdout,stderr io.Writer) error
 	Get(src, dst string) error
 	Push(src, dst string) error
 	TunnelStart(Local, Remote NetworkConfig) error

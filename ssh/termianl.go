@@ -1,7 +1,6 @@
 package ssh
 
 import (
-	"bufio"
 	"fmt"
 	"github.com/kr/fs"
 	"github.com/pkg/sftp"
@@ -207,22 +206,11 @@ func (c *clientType) interactiveSession() error {
 	return nil
 }
 
-func (c *clientType) Run(cmd string, w io.Writer) error {
+func (c *clientType) Run(cmd string, stdout, stderr io.Writer) error {
 	// close session
 	defer c.closeSession()
-	reader, ReaderErr := c.session.StdoutPipe()
-	if ReaderErr != nil {
-		return ReaderErr
-	}
-	scanner := bufio.NewScanner(reader)
-	go func(output io.Writer) {
-		for scanner.Scan() {
-			if _, e := fmt.Fprintln(output, scanner.Text()); e != nil {
-				continue
-			}
-		}
-	}(w)
-
+	c.session.Stdout = stdout
+	c.session.Stderr = stderr
 	if err := c.session.Run(cmd); err != nil {
 		return err
 	}
