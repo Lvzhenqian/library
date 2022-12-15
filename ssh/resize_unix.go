@@ -4,7 +4,7 @@ package ssh
 
 import (
 	"fmt"
-	"golang.org/x/crypto/ssh/terminal"
+	terminal "golang.org/x/term"
 	"os"
 	"os/signal"
 	"syscall"

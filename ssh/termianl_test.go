@@ -5,16 +5,20 @@ import (
 	"testing"
 )
 
-var auth = &AuthConfig{
-	Username:   "root",
-	Password:   "charles",
-	PrivateKey: "",
-	NetworkConfig: NetworkConfig{
-		Network:        "tcp",
-		Address:        "10.1.12.237:22",
-		ConnectTimeout: 2,
-	},
-}
+var (
+	auth = &AuthConfig{
+		Username:   "root",
+		Password:   "charles",
+		PrivateKey: "",
+		NetworkConfig: NetworkConfig{
+			Network:        "tcp",
+			Address:        "10.1.12.237:22",
+			ConnectTimeout: 2,
+		},
+	}
+	stdout = os.Stdout
+	stderr = os.Stderr
+)
 
 func TestSSHTerminal_Run(t *testing.T) {
 	cli, newClientErr := NewClient(auth)
@@ -23,7 +27,7 @@ func TestSSHTerminal_Run(t *testing.T) {
 		return
 	}
 	defer cli.Close()
-	if err := cli.Run("hostname", os.Stdout); err != nil {
+	if err := cli.Run("hostname", stdout, stderr); err != nil {
 		t.Error(err)
 	}
 }
@@ -94,12 +98,12 @@ func TestSshClient_Proxy(t *testing.T) {
 		return
 	}
 	defer secondClient.Close()
-	secondClient.Run("hostname", os.Stdout)
+	secondClient.Run("hostname", stdout, stderr)
 }
 
 func ExampleNewClient() {
 	cli, _ := NewClient(auth)
-	cli.Run("w", os.Stdout)
+	cli.Run("w", stdout, stderr)
 }
 
 func ExampleSSHTerminal_Login() {
