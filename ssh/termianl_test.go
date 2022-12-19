@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"log"
 	"os"
 	"testing"
 )
@@ -12,7 +13,7 @@ var (
 		PrivateKey: "",
 		NetworkConfig: NetworkConfig{
 			Network:        "tcp",
-			Address:        "10.1.12.237:22",
+			Address:        "10.4.15.141:22",
 			ConnectTimeout: 2,
 		},
 	}
@@ -20,7 +21,19 @@ var (
 	stderr = os.Stderr
 )
 
-func TestSSHTerminal_Run(t *testing.T) {
+func TestClientType_Login(t *testing.T) {
+	cli, newClientErr := NewClient(auth)
+	if newClientErr != nil {
+		t.Errorf("new client error: %v", newClientErr)
+		return
+	}
+	defer cli.Close()
+	if err := cli.Login(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientType_Run(t *testing.T) {
 	cli, newClientErr := NewClient(auth)
 	if newClientErr != nil {
 		t.Errorf("new client error: %v", newClientErr)
@@ -28,23 +41,23 @@ func TestSSHTerminal_Run(t *testing.T) {
 	}
 	defer cli.Close()
 	if err := cli.Run("hostname", stdout, stderr); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 }
 
-func TestSSHTerminal_Push(t *testing.T) {
-	cli, Newerr := NewClient(auth)
+func TestClientType_Push(t *testing.T) {
+	cli, Newerr := NewClient(auth, WithProgressBar(true))
 	if Newerr != nil {
 		t.Errorf("new client error: %v", Newerr)
 		return
 	}
 	defer cli.Close()
-	if err := cli.Push("~/Downloads/jdk1.8.0_241.zip", "/tmp"); err != nil {
+	if err := cli.Push("~/Downloads/jdk-8u241-linux-x64.tar.gz", "/tmp"); err != nil {
 		t.Error(err)
 	}
 }
 
-func TestSSHTerminal_Get(t *testing.T) {
+func TestClientType_Get(t *testing.T) {
 	cli, Newerr := NewClient(auth)
 
 	if Newerr != nil {
@@ -57,7 +70,7 @@ func TestSSHTerminal_Get(t *testing.T) {
 	}
 }
 
-func TestSSHTerminal_TunnelStart(t *testing.T) {
+func TestClientType_TunnelStart(t *testing.T) {
 	LocalConfig := NetworkConfig{
 		Network: "tcp",
 		Address: "127.0.0.1:6666",
@@ -101,29 +114,37 @@ func TestSshClient_Proxy(t *testing.T) {
 	secondClient.Run("hostname", stdout, stderr)
 }
 
-func ExampleNewClient() {
+func ExampleClientType_Run() {
 	cli, _ := NewClient(auth)
-	cli.Run("w", stdout, stderr)
+	if err := cli.Run("w", stdout, stderr); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func ExampleSSHTerminal_Login() {
+func ExampleClientType_Login() {
 	cli, _ := NewClient(auth)
-	cli.Login()
+	if err := cli.Login(); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func ExampleSSHTerminal_Get() {
-	cli, _ := NewClient(auth)
-	defer cli.Close()
-	cli.Get("/tmp/test02", ".")
-}
-
-func ExampleSSHTerminal_Push() {
+func ExampleClientType_Get() {
 	cli, _ := NewClient(auth)
 	defer cli.Close()
-	cli.Push("./test", "/tmp")
+	if err := cli.Get("/tmp/test02", "."); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func ExampleSSHTerminal_TunnelStart() {
+func ExampleClientType_Push() {
+	cli, _ := NewClient(auth)
+	defer cli.Close()
+	if err := cli.Push("./test", "/tmp"); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ExampleClientType_TunnelStart() {
 	cli, _ := NewClient(auth)
 	local := NetworkConfig{
 		Network: "tcp",
@@ -133,5 +154,7 @@ func ExampleSSHTerminal_TunnelStart() {
 		Network: "unix",
 		Address: "/var/run/docker.sock",
 	}
-	cli.TunnelStart(local, remote)
+	if err := cli.TunnelStart(local, remote); err != nil {
+		log.Fatal(err)
+	}
 }

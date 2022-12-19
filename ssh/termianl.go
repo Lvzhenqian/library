@@ -17,18 +17,15 @@ import (
 	"time"
 )
 
-type clientType struct {
+type Option func(*ClientType)
+
+type ClientType struct {
 	session *ssh.Session
 	client  *ssh.Client
 	pb      bool
-	exitMsg string
-
-	stdout io.Reader
-	stdin  io.Writer
-	stderr io.Reader
 }
 
-func NewClient(conf *AuthConfig) (Client, error) {
+func NewClient(conf *AuthConfig, option ...Option) (Client, error) {
 	clientCfg, cfgErr := authConfig(conf)
 	if cfgErr != nil {
 		return nil, cfgErr
@@ -42,7 +39,11 @@ func NewClient(conf *AuthConfig) (Client, error) {
 	if getSessionErr != nil {
 		return nil, getSessionErr
 	}
-	return &clientType{client: cli, session: session}, nil
+	tp := &ClientType{client: cli, session: session}
+	for _, opt := range option {
+		opt(tp)
+	}
+	return tp, nil
 }
 
 func authConfig(conf *AuthConfig) (*ssh.ClientConfig, error) {
@@ -129,7 +130,7 @@ func remoteRealpath(ph string, c *sftp.Client) string {
 	return ph
 }
 
-func (c *clientType) progressBar(title string, total int64) *pb.ProgressBar {
+func (c *ClientType) progressBar(title string, total int64) *pb.ProgressBar {
 	bar := pb.New64(total)
 	bar.SetUnits(pb.U_BYTES)
 	bar.ShowSpeed = true
@@ -139,91 +140,89 @@ func (c *clientType) progressBar(title string, total int64) *pb.ProgressBar {
 	return bar
 }
 
-func (c *clientType) closeSession() error {
+func (c *ClientType) closeSession() error {
 	return c.session.Close()
 }
 
-func (c *clientType) interactiveSession() error {
+func (c *ClientType) interactiveSession() error {
 	defer c.closeSession()
-	defer func() {
-		if c.exitMsg == "" {
-			fmt.Fprintln(os.Stdout, "the connection was closed on the remote side on ", time.Now().Format(time.RFC822))
-		} else {
-			fmt.Fprintln(os.Stdout, c.exitMsg)
-		}
-	}()
 
 	fd := int(os.Stdin.Fd())
 	state, err := terminal.MakeRaw(fd)
 	if err != nil {
-		return err
+		return fmt.Errorf("terminal.MakeRaw error: %w", err)
 	}
 	defer terminal.Restore(fd, state)
 
-	termWidth, termHeight, err := terminal.GetSize(fd)
-	if err != nil {
-		return err
+	termWidth, termHeight, getSizeErr := terminal.GetSize(fd)
+	if getSizeErr != nil {
+		return fmt.Errorf("terminal.GetSize error: %w", getSizeErr)
 	}
 
 	termType, ok := os.LookupEnv("TERM")
-
 	if !ok {
 		termType = "linux"
 	}
 
-	err = c.session.RequestPty(termType, termHeight, termWidth, ssh.TerminalModes{})
-	if err != nil {
-		return err
+	if requestPtyErr := c.session.RequestPty(termType, termHeight, termWidth, ssh.TerminalModes{}); requestPtyErr != nil {
+		return fmt.Errorf("c.session.RequestPty error: %w", requestPtyErr)
 	}
-
-	c.updateTerminalSize()
-
-	c.stdin, err = c.session.StdinPipe()
-	if err != nil {
-		return err
-	}
-	c.stdout, err = c.session.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	c.stderr, err = c.session.StderrPipe()
-	if err != nil {
-		return err
-	}
-
-	go io.Copy(os.Stderr, c.stderr)
-	go io.Copy(os.Stdout, c.stdout)
+	changeSizeErr := make(chan error)
 	go func() {
-		buf := make([]byte, 128)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			if n > 0 {
-				_, err = c.stdin.Write(buf[:n])
-				if err != nil {
-					fmt.Println(err)
-					c.exitMsg = err.Error()
-					return
-				}
-			}
+		for changeErr := range changeSizeErr {
+			fmt.Fprintf(os.Stderr, "updateTerminalSize err: %v", changeErr)
 		}
 	}()
+	go c.updateTerminalSize(fd, termWidth, termHeight, changeSizeErr)
+	defer close(changeSizeErr)
 
-	err = c.session.Shell()
-	if err != nil {
+	//c.stdin, err = c.session.StdinPipe()
+	//if err != nil {
+	//	return err
+	//}
+	//c.stdout, err = c.session.StdoutPipe()
+	//if err != nil {
+	//	return err
+	//}
+	//c.stderr, err = c.session.StderrPipe()
+	//if err != nil {
+	//	return err
+	//}
+	c.session.Stdout = os.Stdout
+	c.session.Stderr = os.Stderr
+	c.session.Stdin = os.Stdin
+	//go io.Copy(os.Stderr, c.session.Stderr)
+	//go io.Copy(os.Stdout, c.stdout)
+	//go func() {
+	//	buf := make([]byte, 128)
+	//	for {
+	//		n, err := os.Stdin.Read(buf)
+	//		if err != nil {
+	//			fmt.Println(err)
+	//			return
+	//		}
+	//		if n > 0 {
+	//			_, err = c.stdin.Write(buf[:n])
+	//			if err != nil {
+	//				fmt.Println(err)
+	//				c.exitMsg = err.Error()
+	//				return
+	//			}
+	//		}
+	//	}
+	//}()
+
+	if err = c.session.Shell(); err != nil {
 		return err
 	}
-	err = c.session.Wait()
-	if err != nil {
-		return err
-	}
-	return nil
+	return c.session.Wait()
 }
 
-func (c *clientType) Run(cmd string, stdout, stderr io.Writer) error {
+func (c *ClientType) Login() error {
+	return c.interactiveSession()
+}
+
+func (c *ClientType) Run(cmd string, stdout, stderr io.Writer) error {
 	// close session
 	defer c.closeSession()
 	c.session.Stdout = stdout
@@ -234,11 +233,7 @@ func (c *clientType) Run(cmd string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func (c *clientType) Login() error {
-	return c.interactiveSession()
-}
-
-func (c *clientType) PushFile(src string, dst string) error {
+func (c *ClientType) PushFile(src string, dst string) error {
 	sftpClient, sftpErr := sftp.NewClient(c.client)
 	if sftpErr != nil {
 		return sftpErr
@@ -275,7 +270,7 @@ func (c *clientType) PushFile(src string, dst string) error {
 	return err
 }
 
-func (c *clientType) GetFile(src string, dst string) error {
+func (c *ClientType) GetFile(src string, dst string) error {
 	sftpClient, sftpErr := sftp.NewClient(c.client)
 	if sftpErr != nil {
 		return sftpErr
@@ -312,7 +307,7 @@ func (c *clientType) GetFile(src string, dst string) error {
 	return err
 }
 
-func (c *clientType) PushDir(src string, dst string) error {
+func (c *ClientType) PushDir(src string, dst string) error {
 	sftpClient, sftpErr := sftp.NewClient(c.client)
 	if sftpErr != nil {
 		return sftpErr
@@ -344,11 +339,11 @@ func (c *clientType) PushDir(src string, dst string) error {
 			}
 		default:
 			wg.Add(1)
-			go func(wgroup *sync.WaitGroup, b *pb.ProgressBar, Srcfile string, Dstfile string) {
-				defer wgroup.Done()
-				s, _ := os.Open(Srcfile)
+			go func(w *sync.WaitGroup, b *pb.ProgressBar, SrcFile string, DstFile string) {
+				defer w.Done()
+				s, _ := os.Open(SrcFile)
 				defer s.Close()
-				d, _ := sftpClient.Create(Dstfile)
+				d, _ := sftpClient.Create(DstFile)
 				defer d.Close()
 				i, _ := io.Copy(d, s)
 				if b != nil {
@@ -361,7 +356,7 @@ func (c *clientType) PushDir(src string, dst string) error {
 	})
 }
 
-func (c *clientType) GetDir(src string, dst string) error {
+func (c *ClientType) GetDir(src string, dst string) error {
 	sftpClient, sftpErr := sftp.NewClient(c.client)
 	if sftpErr != nil {
 		return sftpErr
@@ -397,8 +392,8 @@ func (c *clientType) GetDir(src string, dst string) error {
 	wg.Add(1)
 	go func(w *fs.Walker, c *sftp.Client, g *sync.WaitGroup, b *pb.ProgressBar) {
 		for w.Step() {
-			pdst := strings.TrimPrefix(w.Path(), base)
-			p := path.Join(RealDst, pdst)
+			prefix := strings.TrimPrefix(w.Path(), base)
+			p := path.Join(RealDst, prefix)
 			stats := w.Stat()
 			switch {
 			case walker.Err() != nil:
@@ -429,7 +424,7 @@ func (c *clientType) GetDir(src string, dst string) error {
 	return nil
 }
 
-func (c *clientType) Get(src, dst string) error {
+func (c *ClientType) Get(src, dst string) error {
 
 	sftpCli, err := sftp.NewClient(c.client)
 	if err != nil {
@@ -438,15 +433,15 @@ func (c *clientType) Get(src, dst string) error {
 	defer sftpCli.Close()
 	RealSrc := remoteRealpath(src, sftpCli)
 	RealDst := localRealPath(dst)
-	state, Serr := sftpCli.Stat(RealSrc)
-	if Serr != nil {
-		return Serr
+	state, statErr := sftpCli.Stat(RealSrc)
+	if statErr != nil {
+		return statErr
 	}
 	if state.IsDir() {
 		return c.GetDir(RealSrc, RealDst)
 	} else {
-		Dstat, _ := os.Stat(RealDst)
-		if Dstat.IsDir() {
+		dstState, _ := os.Stat(RealDst)
+		if dstState.IsDir() {
 			return c.GetFile(RealSrc, filepath.Join(RealDst, filepath.Base(src)))
 		} else {
 			return c.GetFile(RealSrc, RealDst)
@@ -454,12 +449,12 @@ func (c *clientType) Get(src, dst string) error {
 	}
 }
 
-func (c *clientType) Push(src, dst string) error {
+func (c *ClientType) Push(src, dst string) error {
 
 	RealSrc := localRealPath(src)
-	SrcState, Serr := os.Stat(RealSrc)
-	if Serr != nil {
-		panic(Serr)
+	SrcState, statErr := os.Stat(RealSrc)
+	if statErr != nil {
+		panic(statErr)
 	}
 	if SrcState.IsDir() {
 		return c.PushDir(RealSrc, dst)
@@ -470,11 +465,11 @@ func (c *clientType) Push(src, dst string) error {
 		}
 		defer sftpCli.Close()
 		RealDst := remoteRealpath(dst, sftpCli)
-		Dstat, err := sftpCli.Stat(RealDst)
+		dstErr, err := sftpCli.Stat(RealDst)
 		if err != nil {
 			panic(err)
 		}
-		if Dstat.IsDir() {
+		if dstErr.IsDir() {
 			return c.PushFile(RealSrc, filepath.Join(RealDst, filepath.Base(RealSrc)))
 		} else {
 			return c.PushFile(RealSrc, RealDst)
@@ -482,7 +477,7 @@ func (c *clientType) Push(src, dst string) error {
 	}
 }
 
-func (c *clientType) TunnelStart(Local, Remote NetworkConfig) error {
+func (c *ClientType) TunnelStart(Local, Remote NetworkConfig) error {
 	listener, err := net.Listen(Local.Network, Local.Address)
 	if err != nil {
 		return err
@@ -498,7 +493,7 @@ func (c *clientType) TunnelStart(Local, Remote NetworkConfig) error {
 	}
 }
 
-func (c *clientType) forward(localConn net.Conn, remote NetworkConfig) {
+func (c *ClientType) forward(localConn net.Conn, remote NetworkConfig) {
 	remoteConn, err := c.client.Dial(remote.Network, remote.Address)
 	if err != nil {
 		return
@@ -517,12 +512,12 @@ func (c *clientType) forward(localConn net.Conn, remote NetworkConfig) {
 	go copyConn(remoteConn, localConn)
 }
 
-func (c *clientType) Close() error {
+func (c *ClientType) Close() error {
 	c.session.Close()
 	return c.client.Close()
 }
 
-func (c *clientType) Proxy(auth *AuthConfig) (Client, error) {
+func (c *ClientType) Proxy(auth *AuthConfig) (Client, error) {
 	conn, connErr := c.client.Dial(auth.Network, auth.Address)
 	if connErr != nil {
 		return nil, connErr
@@ -531,14 +526,20 @@ func (c *clientType) Proxy(auth *AuthConfig) (Client, error) {
 	if cfgErr != nil {
 		return nil, cfgErr
 	}
-	ncc, chans, reqs, err := ssh.NewClientConn(conn, auth.Address, proxyCfg)
+	ncc, cs, reqs, err := ssh.NewClientConn(conn, auth.Address, proxyCfg)
 	if err != nil {
 		return nil, err
 	}
-	client := ssh.NewClient(ncc, chans, reqs)
+	client := ssh.NewClient(ncc, cs, reqs)
 	session, sessionErr := client.NewSession()
 	if sessionErr != nil {
 		return nil, sessionErr
 	}
-	return &clientType{client: client, session: session}, nil
+	return &ClientType{client: client, session: session, pb: c.pb}, nil
+}
+
+func WithProgressBar(show bool) Option {
+	return func(c *ClientType) {
+		c.pb = show
+	}
 }

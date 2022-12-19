@@ -3,52 +3,30 @@
 package ssh
 
 import (
-	"fmt"
 	terminal "golang.org/x/term"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
-func (c *clientType) updateTerminalSize() {
+func (c *ClientType) updateTerminalSize(fd, termWidth, termHeight int, failed chan error) {
+	sigwinchCh := make(chan os.Signal, 1)
+	signal.Notify(sigwinchCh, syscall.SIGWINCH)
 
-	go func() {
-		// SIGWINCH is sent to the process when the window size of the terminal has
-		// changed.
-		sigwinchCh := make(chan os.Signal, 1)
-		signal.Notify(sigwinchCh, syscall.SIGWINCH)
-
-		fd := int(os.Stdin.Fd())
-		termWidth, termHeight, err := terminal.GetSize(fd)
-		if err != nil {
-			fmt.Println(err)
+	for range sigwinchCh {
+		currTermWidth, currTermHeight, getSizeErr := terminal.GetSize(fd)
+		if getSizeErr != nil {
+			failed <- getSizeErr
+			continue
+		}
+		if currTermHeight == termHeight && currTermWidth == termWidth {
+			continue
 		}
 
-		for {
-			select {
-			// The client updated the size of the local PTY. This change needs to occur
-			// on the server side PTY as well.
-			case sigwinch := <-sigwinchCh:
-				if sigwinch == nil {
-					return
-				}
-				currTermWidth, currTermHeight, err := terminal.GetSize(fd)
-
-				// Terminal size has not changed, don't do anything.
-				if currTermHeight == termHeight && currTermWidth == termWidth {
-					continue
-				}
-
-				c.session.WindowChange(currTermHeight, currTermWidth)
-				if err != nil {
-					fmt.Printf("Unable to send window-change reqest: %s.", err)
-					continue
-				}
-
-				termWidth, termHeight = currTermWidth, currTermHeight
-
-			}
+		if changeErr := c.session.WindowChange(currTermHeight, currTermWidth); changeErr != nil {
+			failed <- changeErr
+			continue
 		}
-	}()
-
+		termWidth, termHeight = currTermWidth, currTermHeight
+	}
 }
