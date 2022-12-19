@@ -535,7 +535,7 @@ func (c *ClientType) Proxy(auth *AuthConfig) (Client, error) {
 	if sessionErr != nil {
 		return nil, sessionErr
 	}
-	return &ClientType{client: client, session: session}, nil
+	return &ClientType{client: client, session: session, pb: c.pb}, nil
 }
 
 func WithProgressBar(show bool) Option {
