@@ -180,7 +180,7 @@ func (l *ZeroLogger) WithError(err error, msg string) {
 }
 
 func (l *ZeroLogger) WithErrorf(err error, format string, args ...interface{}) {
-	l.multi.Error().Err(err).Msgf(format, args)
+	l.multi.Error().Err(err).Msgf(format, args...)
 }
 
 func (l *ZeroLogger) Warn(msg string) {
@@ -242,7 +242,7 @@ func (l *ZeroLogger) WithStackError(err error, msg string) {
 }
 
 func (l *ZeroLogger) WithStackErrorf(err error, format string, args ...interface{}) {
-	l.multi.Err(err).Stack().Msgf(format, args)
+	l.multi.Err(err).Stack().Msgf(format, args...)
 }
 
 func (l *ZeroLogger) WithWarp(err error, msg string) error {
@@ -252,8 +252,8 @@ func (l *ZeroLogger) WithWarp(err error, msg string) error {
 }
 
 func (l *ZeroLogger) WithWarpf(err error, format string, args ...interface{}) error {
-	e := errors.Wrapf(err, format, args)
-	l.multi.Err(e).Msgf(format, args)
+	e := errors.Wrapf(err, format, args...)
+	l.multi.Err(e).Msgf(format, args...)
 	return e
 }
 
