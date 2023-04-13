@@ -8,6 +8,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -33,13 +34,23 @@ const (
 var Dict = zerolog.Dict
 
 type ZeroLoggerConfig struct {
-	MaxSize              int
-	MaxAge               int
-	MaxBackups           int
+	// 每个日志文件最大多少字节
+	MaxSize int
+	// 最大保存多少天前的日志
+	MaxAge int
+	// 最大保留多少个旧日志
+	MaxBackups int
+	// 函数调用栈获取深度，默认为 2
 	CallerSkipFrameCount int
-	Compress             bool
-	Filename             string
-	LogLevel             string
+	// 是否压缩旧日志
+	Compress bool
+	// Filename 文件路径名
+	Filename string
+	// LogLevel 日志级别
+	LogLevel string
+	// CallerPathPrefix stdout输出文件名路径忽略前缀。
+	// 可以通过环境变量名：CONSOLE_CALLER_PATH_PREFIX 修改
+	CallerPathPrefix string
 }
 
 type ZeroLogger struct {
@@ -49,6 +60,22 @@ type ZeroLogger struct {
 	fileWriter  io.Writer
 	multiWriter io.Writer
 	level       *zerolog.Level
+}
+
+func consoleFormatCaller(prefix string) zerolog.Formatter {
+	return func(i interface{}) string {
+		var c string
+		if cc, ok := i.(string); ok {
+			c = cc
+		}
+		if len(c) > 0 {
+			if rel, err := filepath.Rel(prefix, c); err == nil {
+				c = rel
+			}
+			c += fmt.Sprintf("\x1b[%d;%dm%s\x1b[0m", Debug, Weak, " >")
+		}
+		return c
+	}
 }
 
 func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
@@ -70,6 +97,11 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 		return errors.ErrorStack(err)
 	}
 
+	consoleCallerPrefix := conf.CallerPathPrefix
+	if prefix, ok := os.LookupEnv("CONSOLE_CALLER_PATH_PREFIX"); ok {
+		consoleCallerPrefix = prefix
+	}
+	
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
@@ -87,6 +119,7 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 			}
 			return fmt.Sprintf("\x1b[%d;%dm%s\x1b[0m=", Warn, Weak, value)
 		},
+		FormatCaller: consoleFormatCaller(consoleCallerPrefix),
 	}
 
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, fileWriter)

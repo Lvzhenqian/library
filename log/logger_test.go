@@ -15,6 +15,7 @@ var logger, _ = NewLogger(&ZeroLoggerConfig{
 	Compress:             false,
 	Filename:             "./test.log",
 	LogLevel:             "trace",
+	CallerPathPrefix:     "/home/charles/codes/mico-assist/library",
 })
 
 func TestNewLogger(t *testing.T) {
