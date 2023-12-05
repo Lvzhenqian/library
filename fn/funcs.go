@@ -2,7 +2,9 @@ package fn
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
+	"compress/flate"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -15,6 +17,8 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unsafe"
@@ -95,15 +99,15 @@ func SliceTurning[T comparable](target []T, limit int) chan []T {
 }
 
 func ToString(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
+	//return *(*string)(unsafe.Pointer(&b))
+	return unsafe.String(&b[0], len(b))
 }
 
 func ToBytes(s string) []byte {
-	// 字符串结构头
-	strHeader := (*[2]uintptr)(unsafe.Pointer(&s))
-	// 切片结构头，最后一位为cap
-	sliceHeader := [3]uintptr{strHeader[0], strHeader[1], strHeader[1]}
-	return *(*[]byte)(unsafe.Pointer(&sliceHeader))
+	//strHeader := (*[2]uintptr)(unsafe.Pointer(&s))
+	//sliceHeader := [3]uintptr{strHeader[0], strHeader[1], strHeader[1]}
+	//return *(*[]byte)(unsafe.Pointer(&sliceHeader))
+	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 
 // TestPrintJson 以json格式打印测试结果
@@ -169,7 +173,7 @@ func LastCut(src, sep string) (before, after string, found bool) {
 	return src[:idx], src[idx+len(sep):], true
 }
 
-func ZipFile(source, target string) error {
+func ZipFile(source, target string, level int) error {
 	zipFile, err := os.Create(target)
 	if err != nil {
 		return err
@@ -183,6 +187,9 @@ func ZipFile(source, target string) error {
 	defer zipFile.Close()
 	archive := zip.NewWriter(zipFile)
 	defer archive.Close()
+	archive.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
+		return flate.NewWriter(w, level)
+	})
 	stat, statErr := os.Stat(source)
 	if statErr != nil {
 		return statErr
@@ -231,4 +238,149 @@ func ZipFile(source, target string) error {
 	defer file.Close()
 	_, err = io.Copy(writer, file)
 	return err
+}
+
+// 读取文件前 n行
+func Head(f string, n int) string {
+	fd, e := os.Open(f)
+	if e != nil {
+		panic(e)
+	}
+	defer fd.Close()
+	var result strings.Builder
+	buf := bufio.NewScanner(fd)
+	for buf.Scan() && n > 0 {
+		if result.Len() > 0 {
+			result.WriteByte('\n')
+		}
+		result.WriteString(buf.Text())
+		n--
+	}
+	return result.String()
+}
+
+// Tail 输出文件 第n个
+func Tail(f string, n int) string {
+	var (
+		buffSize int64 = 128
+		result         = make([]string, n)
+		now      int64
+		ee       error
+	)
+	fd, e := os.Open(f)
+	if e != nil {
+		panic(e)
+	}
+	defer fd.Close()
+	// 移动指针到文件末尾
+	now, ee = fd.Seek(0, io.SeekEnd)
+	if ee != nil {
+		panic(ee)
+	}
+	if now < buffSize {
+		buffSize = now
+	}
+	var buff = make([]byte, buffSize)
+
+	// 最少输出1行
+	if n == 0 {
+		n = 1
+	}
+
+	for n > 0 && now > 0 {
+		// 每次获取buffSize个字符
+		now, ee = fd.Seek(-buffSize, io.SeekCurrent)
+		if ee != nil {
+			panic(ee)
+		}
+		// 读取这些字符到buff里
+		_, ee = fd.ReadAt(buff, now)
+		if ee != nil {
+			panic(ee)
+		}
+		// 从buff 的最后第二个字符往前查找 \n 字符
+		for i := buffSize - 2; i >= 0; i-- {
+			if buff[i] == '\n' {
+				// 当前char为\n, 当前行则为 i+1 到buffSize
+				v := buff[i+1 : buffSize]
+				tmp := make([]byte, len(v))
+				copy(tmp, v)
+				// 从后往前放
+				n--
+				result[n] = ToString(tmp)
+				// 移动当前位置到 i 地址
+				now, ee = fd.Seek(i, io.SeekCurrent)
+				if ee != nil {
+					panic(ee)
+				}
+				if now < buffSize {
+					buffSize = now
+				}
+				break
+			} else if i == 0 {
+				n--
+				result[n] = string(buff[i])
+			}
+		}
+	}
+	if n != 0 {
+		return strings.Join(result[n:], "\n")
+	}
+	return strings.Join(result, "\n")
+}
+
+func countInt[T ~int | ~int64](i T) int {
+	c := 1
+	for i > 10 {
+		i /= 10
+		c++
+	}
+	return c
+}
+
+// Ls 输出目录或者文件信息
+func Ls(p string) {
+	state, err := os.Stat(p)
+	if err != nil && os.IsNotExist(err) {
+		panic(p + " 路径不存在")
+	}
+	fmt.Printf("%-10s\t%-16s\t%s\t%s\n", "Mode", "ModTime", "Size", "Name")
+
+	if !state.IsDir() {
+		fmt.Printf(
+			"%-10s\t%-16s\t%d\t%s\n",
+			state.Mode(),
+			state.ModTime().Format("2006/01/02 15:04"),
+			state.Size(),
+			state.Name(),
+		)
+		return
+	} else {
+		entrys, err := os.ReadDir(p)
+		if err != nil {
+			panic("读取目录内容失败: " + err.Error())
+		}
+
+		sort.Slice(entrys, func(i, j int) bool {
+			ii, _ := entrys[i].Info()
+			jj, _ := entrys[j].Info()
+			return ii.Size() > jj.Size()
+		})
+		ii, _ := entrys[0].Info()
+		format := "%-10s\t%-16s\t%" + strconv.Itoa(countInt(ii.Size())) + "d\t%s\n"
+		for _, entry := range entrys {
+
+			tp, ee := entry.Info()
+			if ee != nil {
+				continue
+			}
+			fmt.Printf(
+				format,
+				tp.Mode(),
+				tp.ModTime().Format("2006/01/02 15:04"),
+				tp.Size(),
+				tp.Name(),
+			)
+		}
+	}
 }
