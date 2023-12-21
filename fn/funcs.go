@@ -10,17 +10,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unsafe"
 )
 
@@ -173,71 +172,59 @@ func LastCut(src, sep string) (before, after string, found bool) {
 	return src[:idx], src[idx+len(sep):], true
 }
 
+func zipWriter(p string, info os.FileInfo, archive *zip.Writer) error {
+	reader, readErr := os.Open(p)
+	if readErr != nil {
+		return readErr
+	}
+	fh := &zip.FileHeader{
+		Name:     p,
+		Method:   zip.Deflate,
+		Modified: info.ModTime(),
+	}
+	writer, headerErr := archive.CreateHeader(fh)
+	//writer, headerErr := archive.Create(p)
+	if headerErr != nil {
+		return headerErr
+	}
+	_, err := io.Copy(writer, reader)
+	if err != nil {
+		return err
+	}
+	return reader.Close()
+}
+
+// ZipFile 压缩某个路径的文件或者文件夹，生成一个target的zip文件
 func ZipFile(source, target string, level int) error {
 	zipFile, err := os.Create(target)
 	if err != nil {
 		return err
 	}
-	if path.IsAbs(source) {
-		if err := os.Chdir(path.Dir(source)); err != nil {
+	if filepath.IsAbs(source) {
+		if err := os.Chdir(filepath.Dir(source)); err != nil {
 			return err
 		}
-		source = path.Base(source)
+		source = filepath.Base(source)
 	}
 	defer zipFile.Close()
 	archive := zip.NewWriter(zipFile)
-	defer archive.Close()
 	archive.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
 		return flate.NewWriter(w, level)
 	})
+	defer archive.Close()
 	stat, statErr := os.Stat(source)
 	if statErr != nil {
 		return statErr
 	}
 	if stat.IsDir() {
-		return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		return filepath.Walk(source, func(p string, info os.FileInfo, err error) error {
 			if !info.IsDir() {
-				header, err := zip.FileInfoHeader(info)
-				if err != nil {
-					return err
-				}
-				header.Method = zip.Deflate
-				header.Modified = time.Unix(info.ModTime().Unix(), 0)
-				header.Name = path
-				writer, err := archive.CreateHeader(header)
-				if err != nil {
-					return err
-				}
-				file, err := os.Open(path)
-				if err != nil {
-					return err
-				}
-				defer file.Close()
-				_, err = io.Copy(writer, file)
-				return err
+				return zipWriter(p, info, archive)
 			}
 			return nil
 		})
 	}
-
-	header, headErr := zip.FileInfoHeader(stat)
-	if headErr != nil {
-		return headErr
-	}
-	header.Method = zip.Deflate
-	header.Modified = time.Unix(stat.ModTime().Unix(), 0)
-	header.Name = source
-	writer, createErr := archive.CreateHeader(header)
-	if createErr != nil {
-		return err
-	}
-	file, openErr := os.Open(source)
-	if openErr != nil {
-		return openErr
-	}
-	defer file.Close()
-	_, err = io.Copy(writer, file)
-	return err
+	return zipWriter(source, stat, archive)
 }
 
 // 读取文件前 n行
@@ -263,7 +250,7 @@ func Head(f string, n int) string {
 func Tail(f string, n int) string {
 	var (
 		buffSize int64 = 128
-		result         = make([]string, n)
+		buff           = make([]byte, buffSize)
 		now      int64
 		ee       error
 	)
@@ -277,58 +264,80 @@ func Tail(f string, n int) string {
 	if ee != nil {
 		panic(ee)
 	}
-	if now < buffSize {
-		buffSize = now
-	}
-	var buff = make([]byte, buffSize)
 
-	// 最少输出1行
-	if n == 0 {
-		n = 1
-	}
-
-	for n > 0 && now > 0 {
-		// 每次获取buffSize个字符
-		now, ee = fd.Seek(-buffSize, io.SeekCurrent)
+	if n == 0 || now == 0 {
+		return ""
+	} else if now <= buffSize {
+		now, ee = fd.Seek(0, io.SeekStart)
 		if ee != nil {
 			panic(ee)
 		}
-		// 读取这些字符到buff里
-		_, ee = fd.ReadAt(buff, now)
-		if ee != nil {
-			panic(ee)
+		readSize, readErr := fd.Read(buff)
+		if readErr != nil {
+			panic(readErr)
 		}
-		// 从buff 的最后第二个字符往前查找 \n 字符
-		for i := buffSize - 2; i >= 0; i-- {
-			if buff[i] == '\n' {
-				// 当前char为\n, 当前行则为 i+1 到buffSize
-				v := buff[i+1 : buffSize]
-				tmp := make([]byte, len(v))
-				copy(tmp, v)
-				// 从后往前放
+		var (
+			total = buff[:readSize]
+			pos   = len(total) - 1
+		)
+		// 当最后一个字符是\n时，忽略这个\n
+		if total[pos] == '\n' {
+			pos--
+		}
+		for pos >= 0 && n > 0 {
+			if total[pos] == '\n' {
 				n--
-				result[n] = ToString(tmp)
-				// 移动当前位置到 i 地址
-				now, ee = fd.Seek(i, io.SeekCurrent)
-				if ee != nil {
-					panic(ee)
-				}
-				if now < buffSize {
-					buffSize = now
-				}
+			}
+			if n == 0 {
 				break
-			} else if i == 0 {
-				n--
-				result[n] = string(buff[i])
+			}
+			pos--
+		}
+		r := total[pos+1:]
+		return unsafe.String(&r[0], len(r))
+	} else {
+		var (
+			i      = now
+			pos    = now
+			result strings.Builder
+		)
+
+		for i >= 0 && n > 0 {
+			i, ee = fd.Seek(-buffSize, io.SeekCurrent)
+			if ee != nil {
+				panic(ee)
+			}
+			// 读取这些字符到buff里
+			_, ee = fd.ReadAt(buff, i)
+			if ee != nil {
+				panic(ee)
+			}
+			for j := buffSize - 1; j >= 0; j-- {
+				if n < 0 {
+					goto end
+				} else if buff[j] == '\n' {
+					n--
+				}
+				pos--
 			}
 		}
-	}
-	if n != 0 {
-		return strings.Join(result[n:], "\n")
-	}
-	return strings.Join(result, "\n")
-}
+	end:
+		pos += 1
+		// 移动buffSize位，pos只可能 >= i,不可能小于i
+		if pos > i {
+			_, ee = fd.Seek(pos-i, io.SeekCurrent)
+		}
 
+		for {
+			readSize, err := fd.Read(buff)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			result.Write(buff[:readSize])
+		}
+		return result.String()
+	}
+}
 func countInt[T ~int | ~int64](i T) int {
 	c := 1
 	for i > 10 {
@@ -338,20 +347,61 @@ func countInt[T ~int | ~int64](i T) int {
 	return c
 }
 
-// Ls 输出目录或者文件信息
+const (
+	_ = 1 << (iota * 10)
+	KB
+	MB
+	GB
+	TB
+)
+
+func human(num int64, b bool) string {
+	if !b || num < KB {
+		return strconv.Itoa(int(num))
+	}
+	var (
+		unit string
+		n    = float64(num)
+	)
+
+	if n > KB && n < MB {
+		unit = "K"
+		n /= KB
+	} else if n > MB && n < GB {
+		unit = "M"
+		n /= MB
+	} else if n > GB && n < TB {
+		unit = "G"
+		n /= GB
+	} else if n > TB {
+		unit = "T"
+		n /= TB
+	}
+	return fmt.Sprintf("%.1f%s", n, unit)
+}
+
 func Ls(p string) {
+	ls(p, false)
+}
+
+// Ls 输出目录或者文件信息
+func ls(p string, h bool) {
+	var (
+		format     = "%-10s\t%-16s\t%+7s\t%s\n"
+		timeFormat = "2006/01/02 15:04"
+	)
 	state, err := os.Stat(p)
 	if err != nil && os.IsNotExist(err) {
 		panic(p + " 路径不存在")
 	}
-	fmt.Printf("%-10s\t%-16s\t%s\t%s\n", "Mode", "ModTime", "Size", "Name")
+	fmt.Printf(format, "Mode", "ModTime", "Size", "Name")
 
 	if !state.IsDir() {
 		fmt.Printf(
-			"%-10s\t%-16s\t%d\t%s\n",
+			format,
 			state.Mode(),
-			state.ModTime().Format("2006/01/02 15:04"),
-			state.Size(),
+			state.ModTime().Format(timeFormat),
+			human(state.Size(), h),
 			state.Name(),
 		)
 		return
@@ -360,27 +410,29 @@ func Ls(p string) {
 		if err != nil {
 			panic("读取目录内容失败: " + err.Error())
 		}
-
-		sort.Slice(entrys, func(i, j int) bool {
-			ii, _ := entrys[i].Info()
-			jj, _ := entrys[j].Info()
-			return ii.Size() > jj.Size()
-		})
-		ii, _ := entrys[0].Info()
-		format := "%-10s\t%-16s\t%" + strconv.Itoa(countInt(ii.Size())) + "d\t%s\n"
-		for _, entry := range entrys {
-
-			tp, ee := entry.Info()
-			if ee != nil {
-				continue
+		size := len(entrys)
+		if size > 0 {
+			sort.Slice(entrys, func(i, j int) bool {
+				ii, _ := entrys[i].Info()
+				jj, _ := entrys[j].Info()
+				return ii.Size() < jj.Size()
+			})
+			if !h {
+				ii, _ := entrys[size-1].Info()
+				format = "%-10s\t%-16s\t%" + strconv.Itoa(countInt(ii.Size())) + "s\t%s\n"
 			}
-			fmt.Printf(
-				format,
-				tp.Mode(),
-				tp.ModTime().Format("2006/01/02 15:04"),
-				tp.Size(),
-				tp.Name(),
-			)
+			for _, entry := range entrys {
+				tp, ee := entry.Info()
+				if ee == nil {
+					fmt.Printf(
+						format,
+						tp.Mode(),
+						tp.ModTime().Format(timeFormat),
+						human(tp.Size(), h),
+						tp.Name(),
+					)
+				}
+			}
 		}
 	}
 }
