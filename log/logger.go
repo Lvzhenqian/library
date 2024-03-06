@@ -75,6 +75,20 @@ func consoleFormatCaller(prefix string) zerolog.Formatter {
 	}
 }
 
+type traceHook struct{}
+
+func (h traceHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
+	if level != zerolog.NoLevel {
+		s := trace.SpanContextFromContext(e.GetCtx())
+		if s.HasTraceID() {
+			e.Str("trace-id", s.TraceID().String())
+		}
+		if s.HasSpanID() {
+			e.Str("span-id", s.SpanID().String())
+		}
+	}
+}
+
 func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 
 	fileWriter := &lumberjack.Logger{
@@ -120,8 +134,8 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 	}
 
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, fileWriter)
-	file := zerolog.New(fileWriter).Level(level).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
-	multi := zerolog.New(multiWriter).Level(level).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
+	file := zerolog.New(fileWriter).Level(level).Hook(traceHook{}).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
+	multi := zerolog.New(multiWriter).Level(level).Hook(traceHook{}).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
 	return &ZeroLogger{
 		file:  file,
 		multi: multi,
@@ -165,6 +179,11 @@ func (l *ZeroLogger) SetLevel(level string) error {
 	l.multi = zerolog.New(l.multiWriter).Level(newLevel).With().Timestamp()
 	l.level = newLevel
 	return nil
+}
+func (l *ZeroLogger) Ctx(ctx context.Context) *ZeroLogger {
+	l.multi = l.multi.Ctx(ctx)
+	l.file = l.file.Ctx(ctx)
+	return l
 }
 func (l *ZeroLogger) GetLevel() string {
 	return l.level.String()
@@ -290,30 +309,4 @@ func (l *ZeroLogger) ErrorPipe() *io.PipeWriter {
 func (l *ZeroLogger) TimeRecord(t time.Time, f string, value ...interface{}) {
 	multi := l.MultiWithSkipFrame(3)
 	multi.Info().Str("Since", time.Since(t).String()).Msgf(f, value...)
-}
-
-func (l *ZeroLogger) WithCtx(ctx context.Context) *ZeroLogger {
-	s := trace.SpanContextFromContext(ctx)
-	if s.HasTraceID() {
-		traceId := s.TraceID().String()
-		spanId := s.SpanID().String()
-		hook := traceHook{
-			trace_id: traceId,
-			span_id:  spanId,
-		}
-		l.multi = l.multi.Logger().Hook(hook).With()
-		l.file = l.file.Logger().Hook(hook).With()
-	}
-	return l
-}
-
-type traceHook struct {
-	trace_id string
-	span_id  string
-}
-
-func (h traceHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
-	if level != zerolog.NoLevel {
-		e.Str("trace_id", h.trace_id).Str("span_id", h.span_id)
-	}
 }
