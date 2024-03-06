@@ -2,9 +2,11 @@ package log
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"github.com/Lvzhenqian/library/errors"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/trace"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"os"
@@ -101,7 +103,7 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 	if prefix, ok := os.LookupEnv("CONSOLE_CALLER_PATH_PREFIX"); ok {
 		consoleCallerPrefix = prefix
 	}
-	
+
 	consoleWriter := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
@@ -319,4 +321,32 @@ func (l *ZeroLogger) ErrorPipe() *io.PipeWriter {
 
 func (l *ZeroLogger) TimeRecord(t time.Time, f string, value ...interface{}) {
 	l.multi.Info().Str("Since", time.Since(t).String()).Msgf(f, value...)
+}
+
+func (l *ZeroLogger) WithCtx(ctx context.Context) *ZeroLogger {
+	s := trace.SpanContextFromContext(ctx)
+	if s.HasTraceID() {
+		traceId := s.TraceID().String()
+		spanId := s.SpanID().String()
+		hook := traceHook{
+			trace_id: traceId,
+			span_id:  spanId,
+		}
+		newMulti := l.multi.Hook(hook)
+		newFile := l.file.Hook(hook)
+		l.multi = &newMulti
+		l.file = &newFile
+	}
+	return l
+}
+
+type traceHook struct {
+	trace_id string
+	span_id  string
+}
+
+func (h traceHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
+	if level != zerolog.NoLevel {
+		e.Str("trace_id", h.trace_id).Str("span_id", h.span_id)
+	}
 }
