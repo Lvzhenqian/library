@@ -134,8 +134,8 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 	}
 
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, fileWriter)
-	file := zerolog.New(fileWriter).Level(level).Hook(traceHook{}).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
-	multi := zerolog.New(multiWriter).Level(level).Hook(traceHook{}).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
+	file := zerolog.New(fileWriter).Level(level).Hook(traceHook{}).With().Timestamp()
+	multi := zerolog.New(multiWriter).Level(level).Hook(traceHook{}).With().Timestamp()
 	return &ZeroLogger{
 		file:  file,
 		multi: multi,
@@ -189,13 +189,13 @@ func (l *ZeroLogger) GetLevel() string {
 	return l.level.String()
 }
 func (l *ZeroLogger) File() zerolog.Logger {
-	return l.file.Logger()
+	return l.file.CallerWithSkipFrameCount(2).Logger()
 }
 func (l *ZeroLogger) FileWithSkipFrame(i int) zerolog.Logger {
 	return l.file.CallerWithSkipFrameCount(i).Logger()
 }
 func (l *ZeroLogger) Multi() zerolog.Logger {
-	return l.multi.Logger()
+	return l.multi.CallerWithSkipFrameCount(2).Logger()
 }
 func (l *ZeroLogger) MultiWithSkipFrame(i int) zerolog.Logger {
 	return l.multi.CallerWithSkipFrameCount(i).Logger()
