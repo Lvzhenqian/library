@@ -12,9 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
-	"unsafe"
 )
 
 type colors int
@@ -42,8 +40,6 @@ type ZeroLoggerConfig struct {
 	MaxAge int
 	// 最大保留多少个旧日志
 	MaxBackups int
-	// 函数调用栈获取深度，默认为 2
-	CallerSkipFrameCount int
 	// 是否压缩旧日志
 	Compress bool
 	// Filename 文件路径名
@@ -56,12 +52,11 @@ type ZeroLoggerConfig struct {
 }
 
 type ZeroLogger struct {
-	file        *zerolog.Logger
-	multi       *zerolog.Logger
-	skipFrame   int
+	file        zerolog.Context
+	multi       zerolog.Context
 	fileWriter  io.Writer
 	multiWriter io.Writer
-	level       *zerolog.Level
+	level       zerolog.Level
 }
 
 func consoleFormatCaller(prefix string) zerolog.Formatter {
@@ -125,26 +120,13 @@ func NewLogger(conf *ZeroLoggerConfig) (*ZeroLogger, error) {
 	}
 
 	multiWriter := zerolog.MultiLevelWriter(consoleWriter, fileWriter)
-	if conf.CallerSkipFrameCount == 0 {
-		conf.CallerSkipFrameCount = zerolog.CallerSkipFrameCount
-	}
-	file := newLogger(fileWriter, level, conf.CallerSkipFrameCount)
-	multi := newLogger(multiWriter, level, conf.CallerSkipFrameCount)
+	file := zerolog.New(fileWriter).Level(level).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
+	multi := zerolog.New(multiWriter).Level(level).With().Timestamp().CallerWithSkipFrameCount(zerolog.CallerSkipFrameCount)
 	return &ZeroLogger{
-		file:        &file,
-		multi:       &multi,
-		skipFrame:   conf.CallerSkipFrameCount,
-		fileWriter:  fileWriter,
-		multiWriter: multiWriter,
-		level:       &level,
+		file:  file,
+		multi: multi,
+		level: level,
 	}, nil
-}
-
-func newLogger(writer io.Writer, level zerolog.Level, skip int) zerolog.Logger {
-	return zerolog.New(writer).Level(level).With().
-		Timestamp().
-		CallerWithSkipFrameCount(skip).
-		Logger()
 }
 
 func colorLevel(s string) string {
@@ -179,116 +161,102 @@ func (l *ZeroLogger) SetLevel(level string) error {
 	if err != nil {
 		return err
 	}
-
-	newFile := newLogger(l.fileWriter, newLevel, l.skipFrame)
-	filePt := (*unsafe.Pointer)(unsafe.Pointer(&l.file))
-	atomic.StorePointer(filePt, unsafe.Pointer(&newFile))
-
-	newMulti := newLogger(l.multiWriter, newLevel, l.skipFrame)
-	multiPt := (*unsafe.Pointer)(unsafe.Pointer(&l.multi))
-	atomic.StorePointer(multiPt, unsafe.Pointer(&newMulti))
-
-	levelPt := (*unsafe.Pointer)(unsafe.Pointer(&l.level))
-	atomic.StorePointer(levelPt, unsafe.Pointer(&newLevel))
-
+	l.file = zerolog.New(l.fileWriter).Level(newLevel).With().Timestamp()
+	l.multi = zerolog.New(l.multiWriter).Level(newLevel).With().Timestamp()
+	l.level = newLevel
 	return nil
 }
-
 func (l *ZeroLogger) GetLevel() string {
-	return l.file.GetLevel().String()
+	return l.level.String()
 }
-
+func (l *ZeroLogger) File() zerolog.Logger {
+	return l.file.Logger()
+}
+func (l *ZeroLogger) FileWithSkipFrame(i int) zerolog.Logger {
+	return l.file.CallerWithSkipFrameCount(i).Logger()
+}
+func (l *ZeroLogger) Multi() zerolog.Logger {
+	return l.multi.Logger()
+}
+func (l *ZeroLogger) MultiWithSkipFrame(i int) zerolog.Logger {
+	return l.multi.CallerWithSkipFrameCount(i).Logger()
+}
 func (l *ZeroLogger) Panic(msg string) {
-	l.multi.Panic().Msg(msg)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Panic().Stack().Msg(msg)
 }
-
-func (l *ZeroLogger) Fatal(msg string) {
-	l.multi.Fatal().Msg(msg)
-}
-
-func (l *ZeroLogger) Error(msg string) {
-	l.multi.Error().Msg(msg)
-}
-
-func (l *ZeroLogger) WithError(err error, msg string) {
-	l.multi.Error().Err(err).Msg(msg)
-}
-
-func (l *ZeroLogger) WithErrorf(err error, format string, args ...interface{}) {
-	l.multi.Error().Err(err).Msgf(format, args...)
-}
-
-func (l *ZeroLogger) Warn(msg string) {
-	l.multi.Warn().Msg(msg)
-}
-
-func (l *ZeroLogger) Info(msg string) {
-	l.file.Info().Msg(msg)
-}
-
-func (l *ZeroLogger) Debug(msg string) {
-	l.file.Debug().Msg(msg)
-}
-
-func (l *ZeroLogger) Trace(msg string) {
-	l.file.Trace().Msg(msg)
-}
-
-func (l *ZeroLogger) File() *zerolog.Logger {
-	logger := newLogger(l.fileWriter, *l.level, l.skipFrame-1)
-	return &logger
-}
-
-func (l *ZeroLogger) Multi() *zerolog.Logger {
-	logger := newLogger(l.multiWriter, *l.level, l.skipFrame-1)
-	return &logger
-}
-
 func (l *ZeroLogger) Panicf(f string, value ...interface{}) {
-	l.multi.Panic().Msgf(f, value...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Panic().Stack().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) Fatal(msg string) {
+	multi := l.MultiWithSkipFrame(3)
+	multi.Fatal().Stack().Msg(msg)
+}
 func (l *ZeroLogger) Fatalf(f string, value ...interface{}) {
-	l.multi.Fatal().Msgf(f, value...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Fatal().Stack().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) Error(msg string) {
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Stack().Msg(msg)
+}
 func (l *ZeroLogger) Errorf(f string, value ...interface{}) {
-	l.multi.Error().Msgf(f, value...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Stack().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) WithError(err error, msg string) {
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Stack().Err(err).Msg(msg)
+}
+func (l *ZeroLogger) WithErrorf(err error, format string, args ...interface{}) {
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Stack().Err(err).Msgf(format, args...)
+}
+func (l *ZeroLogger) Warn(msg string) {
+	multi := l.MultiWithSkipFrame(3)
+	multi.Warn().Msg(msg)
+}
 func (l *ZeroLogger) Warnf(f string, value ...interface{}) {
-	l.multi.Warn().Msgf(f, value...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Warn().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) Info(msg string) {
+	file := l.FileWithSkipFrame(3)
+	file.Info().Msg(msg)
+}
 func (l *ZeroLogger) Infof(f string, value ...interface{}) {
-	l.file.Info().Msgf(f, value...)
+	file := l.FileWithSkipFrame(3)
+	file.Info().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) Debug(msg string) {
+	file := l.FileWithSkipFrame(3)
+	file.Debug().Msg(msg)
+}
 func (l *ZeroLogger) Debugf(f string, value ...interface{}) {
-	l.file.Debug().Msgf(f, value...)
+	file := l.FileWithSkipFrame(3)
+	file.Debug().Msgf(f, value...)
 }
-
+func (l *ZeroLogger) Trace(msg string) {
+	file := l.FileWithSkipFrame(3)
+	file.Trace().Msg(msg)
+}
 func (l *ZeroLogger) Tracef(f string, value ...interface{}) {
-	l.file.Trace().Msgf(f, value...)
-}
-
-func (l *ZeroLogger) WithStackError(err error, msg string) {
-	l.multi.Err(err).Stack().Msg(msg)
-}
-
-func (l *ZeroLogger) WithStackErrorf(err error, format string, args ...interface{}) {
-	l.multi.Err(err).Stack().Msgf(format, args...)
+	file := l.FileWithSkipFrame(3)
+	file.Trace().Msgf(f, value...)
 }
 
 func (l *ZeroLogger) WithWarp(err error, msg string) error {
 	e := errors.Wrap(err)
-	l.multi.Err(e).Msg(msg)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Err(e).Msg(msg)
 	return e
 }
 
 func (l *ZeroLogger) WithWarpf(err error, format string, args ...interface{}) error {
 	e := errors.Wrapf(err, format, args...)
-	l.multi.Err(e).Msgf(format, args...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Error().Err(e).Msgf(format, args...)
 	return e
 }
 
@@ -320,7 +288,8 @@ func (l *ZeroLogger) ErrorPipe() *io.PipeWriter {
 }
 
 func (l *ZeroLogger) TimeRecord(t time.Time, f string, value ...interface{}) {
-	l.multi.Info().Str("Since", time.Since(t).String()).Msgf(f, value...)
+	multi := l.MultiWithSkipFrame(3)
+	multi.Info().Str("Since", time.Since(t).String()).Msgf(f, value...)
 }
 
 func (l *ZeroLogger) WithCtx(ctx context.Context) *ZeroLogger {
@@ -332,10 +301,8 @@ func (l *ZeroLogger) WithCtx(ctx context.Context) *ZeroLogger {
 			trace_id: traceId,
 			span_id:  spanId,
 		}
-		newMulti := l.multi.Hook(hook)
-		newFile := l.file.Hook(hook)
-		l.multi = &newMulti
-		l.file = &newFile
+		l.multi = l.multi.Logger().Hook(hook).With()
+		l.file = l.file.Logger().Hook(hook).With()
 	}
 	return l
 }

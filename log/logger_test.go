@@ -8,25 +8,26 @@ import (
 )
 
 var logger, _ = NewLogger(&ZeroLoggerConfig{
-	MaxSize:              10,
-	MaxAge:               10,
-	MaxBackups:           10,
-	CallerSkipFrameCount: 3,
-	Compress:             false,
-	Filename:             "./test.log",
-	LogLevel:             "trace",
-	CallerPathPrefix:     "/home/charles/codes/mico-assist/library",
+	MaxSize:          10,
+	MaxAge:           10,
+	MaxBackups:       10,
+	Compress:         false,
+	Filename:         "./test.log",
+	LogLevel:         "trace",
+	CallerPathPrefix: "/home/charles/codes/mico-assist/library",
 })
 
 func TestNewLogger(t *testing.T) {
-	logger.Multi().Trace().Msg("trace")
-	logger.Multi().Debug().Msg("debug")
+	multi := logger.Multi()
+	multi.Trace().Msg("trace")
+	multi.Debug().Msg("debug")
 	logger.Info("info")
 	logger.Warn("warn")
 	logger.Error("error")
 
-	logger.File().Error().Msg("file error")
-	logger.Multi().Error().Err(errors.New("some error")).Msg("multi error")
+	file := logger.File()
+	file.Error().Msg("file error")
+	multi.Error().Err(errors.New("some error")).Msg("multi error")
 	logger.TimeRecord(time.Now(), "time record %s", "...")
 	logger.Fatal("fatal")
 }
@@ -49,14 +50,16 @@ func TestZeroLogger_Fatal(t *testing.T) {
 func TestZeroLogger_SetLevel(t *testing.T) {
 	t.Log(logger.GetLevel())
 	logger.Tracef("trace00")
-	logger.Multi().Trace().Msg("trace")
-	logger.Multi().Debug().Msg("debug")
+	multi := logger.Multi()
+	multi.Trace().Msg("trace")
+	multi.Debug().Msg("debug")
+	t.Log("set level")
 	if err := logger.SetLevel("warn"); err != nil {
 		t.Error(err)
 		return
 	}
 	logger.Tracef("trace01")
-	logger.Multi().Trace().Msg("trace1")
-	logger.Multi().Debug().Msg("debug1")
+	multi.Trace().Msg("trace1")
+	multi.Debug().Msg("debug1")
 	t.Log(logger.GetLevel())
 }
